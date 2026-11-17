@@ -220,7 +220,8 @@ const tok=()=>S.t&&S.t.access;
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 async function spLogin(){
   if(SB){const{error}=await SB.auth.signInWithOAuth({provider:"spotify",options:{redirectTo:REDIRECT,scopes:"user-read-playback-state user-modify-playback-state user-read-currently-playing"}});if(error){$("#aerr").textContent=error.message;$("#perr").textContent=error.message}return}
-  if(!CONFIG.SPOTIFY_CLIENT_ID){$("#perr").textContent="Add your Spotify client ID in CONFIG.";$("#snote").textContent="Add your Spotify client ID in CONFIG first.";return}
+  if(location.protocol==="file:"){$("#aerr").textContent="Spotify login needs the site served over https (your Netlify URL or localhost), not a file opened from disk.";return}
+  if(!CONFIG.SPOTIFY_CLIENT_ID){const m="Setup needed: add your Supabase URL and anon key (for Spotify login) in CONFIG at the top of the script in index.html.";$("#aerr").textContent=m;$("#perr").textContent=m;$("#snote").textContent=m;return}
   const v=b64(crypto.getRandomValues(new Uint8Array(48)));sessionStorage.setItem("nct_v",v);
   const ch=b64(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v)));
   location.href="https://accounts.spotify.com/authorize?"+new URLSearchParams({client_id:CONFIG.SPOTIFY_CLIENT_ID,response_type:"code",redirect_uri:REDIRECT,code_challenge_method:"S256",code_challenge:ch,scope:"user-read-playback-state user-modify-playback-state user-read-currently-playing"})
