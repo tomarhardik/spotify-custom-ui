@@ -8,16 +8,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,500;1,300;1,500&family=Manrope:wght@300;400;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <!--
-SETUP (see CONFIG below). Supabase SQL:
+SETUP. Supabase SQL (optional):
   create table profiles(id uuid primary key references auth.users on delete cascade,
     display_name text, prefs jsonb default '{}', spotify_connected boolean default false);
   alter table profiles enable row level security;
   create policy "own" on profiles for all using (auth.uid()=id) with check (auth.uid()=id);
-Spotify login: Supabase > Authentication > Providers > Spotify: enable, paste Client ID + Secret, copy the callback URL shown
-  (https://YOUR-PROJECT.supabase.co/auth/v1/callback) into Spotify Dashboard > Redirect URIs.
-  Supabase > Authentication > URL Configuration: set Site URL + Redirect URLs to your Netlify URL.
-Spotify (guest mode only): Dashboard > add Redirect URI = your Netlify URL (exactly). Uses PKCE: no client secret in the browser.
-Netlify: deploy this file; optional netlify.toml with security headers (CSP, X-Frame-Options).
+Spotify (direct / own Client ID mode): Spotify Dashboard > your app > tick "Web API",
+  add Redirect URI = the exact URI shown on the Profile tab (e.g. https://yoursite.netlify.app/ with trailing slash;
+  for local testing use http://127.0.0.1:PORT/ , not localhost).
+  Development-mode apps only work for accounts added under User Management (name + exact email).
+Netlify: deploy this file.
 -->
 <style>
 :root{--void:#020705;--deep:#06130e;--em:#10b981;--em2:#6ee7b7;--mist:#d9f2e7;--dim:#7fa797;--a:16,185,129;--b:4,120,87}
@@ -58,6 +58,8 @@ h1{font:300 clamp(40px,6vw,76px)/1 "Cormorant Garamond",serif;letter-spacing:-.0
 .ctl .pp:hover{background:var(--em2)}
 svg{width:22px;height:22px;fill:currentColor}
 .note{margin-top:22px;font-size:13px;color:var(--dim);line-height:1.6}
+.hint{font-size:12px;color:var(--dim);margin-top:8px;line-height:1.5;word-break:break-all}
+.hint code{color:var(--em2)}
 .pill{display:inline-block;margin-top:18px;padding:11px 22px;border-radius:99px;border:1px solid rgba(var(--a),.6);color:var(--em2);transition:.3s}
 .pill:hover{background:rgba(var(--a),.2);box-shadow:0 0 28px rgba(var(--a),.4)}
 #lyrics{flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:90px 24px 40px}
@@ -67,7 +69,7 @@ svg{width:22px;height:22px;fill:currentColor}
 .ln.on{color:#eafff5;filter:none;text-shadow:0 0 30px var(--em),0 0 80px rgba(var(--a),.7);transform:scale(1.06)}
 .ln.past{color:rgba(217,242,231,.35)}
 #lyrics .sub{color:var(--dim);font-size:13px;margin-top:14px;max-width:520px}
-#profile{align-items:center;justify-content:center;padding:90px 20px}
+#profile{align-items:center;justify-content:center;padding:90px 20px;overflow:auto}
 .card{width:min(460px,100%);padding:34px;border-radius:28px;background:rgba(4,16,11,.6);backdrop-filter:blur(22px);border:1px solid rgba(var(--a),.25);box-shadow:0 0 80px rgba(var(--a),.12)}
 .card h2{font:300 34px "Cormorant Garamond",serif;margin-bottom:6px}
 label{display:block;margin-top:18px;font-size:13px;color:var(--dim)}
@@ -76,7 +78,7 @@ input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--
 .row{display:flex;justify-content:space-between;align-items:center;margin-top:18px;font-size:14px}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#555;margin-right:8px}
 .dot.ok{background:var(--em);box-shadow:0 0 12px var(--em)}
-#auth{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(2,7,5,.82);backdrop-filter:blur(18px);transition:.8s;padding:20px}
+#auth{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(2,7,5,.82);backdrop-filter:blur(18px);transition:.8s;padding:20px;overflow:auto}
 #auth.off{opacity:0;visibility:hidden}
 #auth .logo{font-size:30px;text-align:center;display:block;margin-bottom:22px}
 .spot{width:100%;margin:6px 0 0;background:var(--em);color:var(--void);font-weight:600;border-color:var(--em)}.spot:hover{background:var(--em2)}
@@ -131,6 +133,8 @@ input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--
       <h2 id="pname">Guest</h2>
       <p class="album" id="pmail">Not signed in</p>
       <label>Display name<input type="text" id="dname" maxlength="40"></label>
+      <label>Spotify Client ID (optional, uses your own Spotify app)<input type="text" class="cid" id="cid2" placeholder="Using the built-in ID" autocomplete="off" spellcheck="false"></label>
+      <p class="hint">Add this Redirect URI in your Spotify app: <code class="ruri"></code></p>
       <div class="row"><span>Adaptive colours from artwork</span><button class="toggle on" id="pAdapt" aria-label="Toggle adaptive colours"></button></div>
       <div class="row"><span>Floating particles</span><button class="toggle on" id="pPart" aria-label="Toggle particles"></button></div>
       <div class="row"><span><i class="dot" id="sdot"></i><span id="sstat">Spotify not connected</span></span><button class="pill" style="margin:0;padding:7px 16px" id="sdis">Disconnect</button></div>
@@ -144,6 +148,8 @@ input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--
   <form class="card" id="af" onsubmit="return false">
     <span class="logo">NOCTURNE</span>
     <h2 id="atitle">Sign in</h2>
+    <label style="margin-top:0">Spotify Client ID (optional)<input type="text" class="cid" id="cid1" placeholder="Using the built-in ID" autocomplete="off" spellcheck="false"></label>
+    <p class="hint">Redirect URI for your Spotify app: <code class="ruri"></code></p>
     <button type="button" class="pill spot" id="spAuth">Continue with Spotify</button>
     <p class="sw" style="text-align:center">or use email</p>
     <label>Email<input type="email" id="em" autocomplete="email" required></label>
@@ -159,13 +165,23 @@ input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--
 const CONFIG={
   SUPABASE_URL:"",            // https://xxxx.supabase.co
   SUPABASE_ANON_KEY:"",
-  SPOTIFY_CLIENT_ID:"d9dcf80dfa2b4c24895953129bbb6e0a"
+  SPOTIFY_CLIENT_ID:"d9dcf80dfa2b4c24895953129bbb6e0a"   // default; users can override on the sign-in/Profile screens
 };
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const REDIRECT=location.origin+location.pathname;
 const SB=(CONFIG.SUPABASE_URL&&window.supabase)?supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY):null;
 let user=null,prefs={adapt:true,particles:true,name:""};
 const fmt=ms=>{ms=Math.max(0,ms|0)/1000|0;return(ms/60|0)+":"+String(ms%60).padStart(2,"0")};
+
+/* ---------- Client ID (user's own Spotify app) ---------- */
+const customCid=()=>{try{return(localStorage.getItem("nct_cid")||"").trim()}catch(e){return""}};
+const cid=()=>customCid()||CONFIG.SPOTIFY_CLIENT_ID;
+$$(".ruri").forEach(e=>e.textContent=REDIRECT);
+$$(".cid").forEach(i=>{
+  i.value=customCid();
+  i.onchange=()=>{const v=i.value.trim();try{v?localStorage.setItem("nct_cid",v):localStorage.removeItem("nct_cid")}catch(e){}
+    $$(".cid").forEach(o=>o.value=v);S.t=null;np=null;renderProfile();paint()}
+});
 
 /* ---------- Views ---------- */
 function show(v){$$(".view").forEach(e=>e.classList.toggle("on",e.id===v));$$(".tab").forEach(t=>t.classList.toggle("on",t.dataset.v===v))}
@@ -201,13 +217,13 @@ function renderProfile(){
   $("#pAdapt").classList.toggle("on",prefs.adapt);$("#pPart").classList.toggle("on",prefs.particles);
   const c=!!tok();$("#sdot").classList.toggle("ok",c);$("#sstat").textContent=c?"Spotify connected":"Spotify not connected";
   $("#sdis").style.display=c?"":"none";$("#sconnect").style.display=c?"none":"";
-  $("#snote").textContent=c?"Playback controls work on your active Spotify device (Premium required).":"Spotify Premium is needed for playback controls. Open Spotify on any device, then press play."
+  if(!lastErr)$("#snote").textContent=c?"Playback controls work on your active Spotify device (Premium required).":"Spotify Premium is needed for playback controls. Open Spotify on any device, then press play."
 }
 $("#pAdapt").onclick=()=>{prefs.adapt=!prefs.adapt;renderProfile()};
 $("#pPart").onclick=()=>{prefs.particles=!prefs.particles;renderProfile()};
 $("#save").onclick=async()=>{
   prefs.name=$("#dname").value.trim();applyPrefs();renderProfile();
-  localStorage.setItem("nct_prefs",JSON.stringify(prefs));
+  try{localStorage.setItem("nct_prefs",JSON.stringify(prefs))}catch(e){}
   if(SB&&user){const{error}=await SB.from("profiles").upsert({id:user.id,display_name:prefs.name,prefs:{adapt:prefs.adapt,particles:prefs.particles},spotify_connected:!!tok()});$("#perr").textContent=error?error.message:"Saved."}
   else $("#perr").textContent="Saved on this device."
 };
@@ -215,35 +231,58 @@ function applyPrefs(){if(!prefs.adapt)setColors([16,185,129],[4,120,87])}
 try{Object.assign(prefs,JSON.parse(localStorage.getItem("nct_prefs")||"{}"))}catch(e){}
 
 /* ---------- Spotify (PKCE, no secret) ---------- */
-const S={get t(){try{return JSON.parse(localStorage.getItem("nct_sp")||"null")}catch(e){return null}},set t(v){v?localStorage.setItem("nct_sp",JSON.stringify(v)):localStorage.removeItem("nct_sp")}};
+const SCOPES="user-read-playback-state user-modify-playback-state user-read-currently-playing";
+const S={get t(){try{return JSON.parse(localStorage.getItem("nct_sp")||"null")}catch(e){return null}},set t(v){try{v?localStorage.setItem("nct_sp",JSON.stringify(v)):localStorage.removeItem("nct_sp")}catch(e){}}};
 const tok=()=>S.t&&S.t.access;
+let lastErr="";
+function setErr(m){lastErr=m;$("#snote").textContent=m}
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 async function spLogin(){
-  if(SB){const{error}=await SB.auth.signInWithOAuth({provider:"spotify",options:{redirectTo:REDIRECT,scopes:"user-read-playback-state user-modify-playback-state user-read-currently-playing"}});if(error){$("#aerr").textContent=error.message;$("#perr").textContent=error.message}return}
-  if(location.protocol==="file:"){$("#aerr").textContent="Spotify login needs the site served over https (your Netlify URL or localhost), not a file opened from disk.";return}
-  if(!CONFIG.SPOTIFY_CLIENT_ID){const m="Site owner setup needed: add SPOTIFY_CLIENT_ID in CONFIG (index.html).";$("#aerr").textContent=m;$("#perr").textContent=m;$("#snote").textContent=m;return}
+  /* Supabase's Spotify provider is used only when no custom Client ID is set. */
+  if(SB&&!customCid()){const{error}=await SB.auth.signInWithOAuth({provider:"spotify",options:{redirectTo:REDIRECT,scopes:SCOPES}});if(error){$("#aerr").textContent=error.message;$("#perr").textContent=error.message}return}
+  if(location.protocol==="file:"){const m="Spotify login needs the site served over https (your Netlify URL) or http://127.0.0.1, not a file opened from disk.";$("#aerr").textContent=m;setErr(m);return}
+  if(!cid()){const m="Enter a Spotify Client ID first.";$("#aerr").textContent=m;$("#perr").textContent=m;setErr(m);return}
   const v=b64(crypto.getRandomValues(new Uint8Array(48)));sessionStorage.setItem("nct_v",v);
   const ch=b64(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v)));
-  location.href="https://accounts.spotify.com/authorize?"+new URLSearchParams({client_id:CONFIG.SPOTIFY_CLIENT_ID,response_type:"code",redirect_uri:REDIRECT,code_challenge_method:"S256",code_challenge:ch,scope:"user-read-playback-state user-modify-playback-state user-read-currently-playing"})
+  location.href="https://accounts.spotify.com/authorize?"+new URLSearchParams({client_id:cid(),response_type:"code",redirect_uri:REDIRECT,code_challenge_method:"S256",code_challenge:ch,scope:SCOPES})
 }
 async function spToken(body){
-  const r=await fetch("https://accounts.spotify.com/api/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:CONFIG.SPOTIFY_CLIENT_ID,...body})});
-  if(!r.ok)throw 0;const j=await r.json();
+  const r=await fetch("https://accounts.spotify.com/api/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:cid(),...body})});
+  if(!r.ok){let m="";try{const e=await r.json();m=e.error_description||e.error||""}catch(_){}throw new Error(m||("Token request failed ("+r.status+")"))}
+  const j=await r.json();
   S.t={access:j.access_token,refresh:j.refresh_token||(S.t&&S.t.refresh),exp:Date.now()+j.expires_in*1000-30000}
 }
 async function spApi(path,method="GET"){
   if(!S.t)return null;
-  if(Date.now()>S.t.exp&&!S.t.refresh){S.t=null;np=null;renderProfile();paint();$("#snote").textContent="Your Spotify session expired. Press Connect Spotify to reconnect.";return null}
-  if(Date.now()>S.t.exp){try{await spToken({grant_type:"refresh_token",refresh_token:S.t.refresh})}catch(e){S.t=null;renderProfile();return null}}
-  const r=await fetch("https://api.spotify.com/v1"+path,{method,headers:{Authorization:"Bearer "+S.t.access}});
-  return r.status===200?r.json():null
+  if(Date.now()>S.t.exp){
+    if(!S.t.refresh){S.t=null;np=null;setErr("Session expired. Press Connect Spotify.");renderProfile();paint();return null}
+    try{await spToken({grant_type:"refresh_token",refresh_token:S.t.refresh})}
+    catch(e){S.t=null;np=null;setErr("Could not refresh Spotify session: "+e.message+". Reconnect.");renderProfile();paint();return null}
+  }
+  let r;
+  try{r=await fetch("https://api.spotify.com/v1"+path,{method,headers:{Authorization:"Bearer "+S.t.access}})}
+  catch(e){setErr("Network error talking to Spotify.");return null}
+  if(r.ok){lastErr="";return r.status===200?r.json().catch(()=>null):null}   // 204 = no active device / success with no body
+  let m="";try{m=(await r.json()).error.message}catch(e){}
+  console.error("Spotify API",r.status,path,m);
+  if(r.status===401){S.t=null;np=null;setErr("Spotify token rejected (401). Press Connect Spotify to reconnect.");renderProfile();paint()}
+  else if(r.status===403)setErr("Spotify refused access (403). Add your account (exact email) under User Management in your Spotify dashboard, make sure the Client ID belongs to that app, and note playback controls need Premium. "+m);
+  else if(r.status===404)setErr("No active Spotify device found. Open Spotify and press play.");
+  else if(r.status===429)setErr("Spotify rate limit hit (429). Wait a moment.");
+  else setErr("Spotify error "+r.status+": "+m);
+  return null
 }
 $("#sconnect").onclick=spLogin;$("#spAuth").onclick=spLogin;
 function grab(s){if(s&&s.provider_token&&s.user&&s.user.app_metadata.provider==="spotify")S.t={access:s.provider_token,refresh:null,exp:Date.now()+3500e3}}
-$("#sdis").onclick=()=>{S.t=null;renderProfile();np=null;paint()};
+$("#sdis").onclick=()=>{S.t=null;lastErr="";renderProfile();np=null;paint()};
 (async()=>{
-  const c=new URLSearchParams(location.search).get("code");
-  if(c&&!SB){history.replaceState({},"",REDIRECT);try{await spToken({grant_type:"authorization_code",code:c,redirect_uri:REDIRECT,code_verifier:sessionStorage.getItem("nct_v")});enterSpotify()}catch(e){$("#snote").textContent="Spotify sign-in failed. Check the redirect URI in your Spotify dashboard."}}
+  const q=new URLSearchParams(location.search),c=q.get("code"),v=sessionStorage.getItem("nct_v");
+  if(q.get("error")&&v){history.replaceState({},"",REDIRECT);sessionStorage.removeItem("nct_v");setErr("Spotify authorisation failed: "+q.get("error"));return}
+  if(c&&v){
+    history.replaceState({},"",REDIRECT);
+    try{await spToken({grant_type:"authorization_code",code:c,redirect_uri:REDIRECT,code_verifier:v});sessionStorage.removeItem("nct_v");lastErr="";enterSpotify()}
+    catch(e){setErr("Spotify sign-in failed: "+e.message+". Check that the Redirect URI in your Spotify dashboard is exactly "+REDIRECT)}
+  }
 })();
 
 function enterSpotify(){$("#auth").classList.add("off");renderProfile();poll();spApi("/me").then(m=>{if(m&&!prefs.name){prefs.name=m.display_name||"";renderProfile()}})}
@@ -251,24 +290,33 @@ function enterSpotify(){$("#auth").classList.add("off");renderProfile();poll();s
 let np=null,stamp=0;
 async function poll(){
   if(!tok())return;
-  const d=await spApi("/me/player");
-  if(!d||!d.item){np=null;paint();return}
-  const it=d.item,img=(it.album.images[0]||{}).url;
+  const d=await spApi("/me/player?additional_types=episode");
+  if(!d||!d.item){
+    np=null;paint();
+    if(tok()&&!lastErr)$("#snote").textContent="Nothing active. Open Spotify on any device and press play, then wait a few seconds.";
+    return
+  }
+  const it=d.item,al=it.album||it.show||{},img=((al.images)||[])[0]?.url;
   const changed=!np||np.id!==it.id;
-  np={id:it.id,title:it.name,artist:it.artists.map(a=>a.name).join(", "),album:it.album.name+" · "+(it.album.release_date||"").slice(0,4),img,dur:it.duration_ms,pos:d.progress_ms,playing:d.is_playing};
-  stamp=performance.now();paint();if(changed&&img)palette(img)
+  np={id:it.id,title:it.name,
+    artist:it.artists?it.artists.map(a=>a.name).join(", "):(it.show?.publisher||""),
+    album:(al.name||"")+(al.release_date?" · "+al.release_date.slice(0,4):""),
+    img,dur:it.duration_ms,pos:d.progress_ms,playing:d.is_playing};
+  stamp=performance.now();paint();renderProfile();if(changed&&img)palette(img)
 }
 function paint(){
   const n=np;
-  $("#title").textContent=n?n.title:"Nothing playing";
-  $("#artist").textContent=n?n.artist:(tok()?"Start playing in Spotify":"Connect Spotify to begin");
-  $("#album").textContent=n?n.album:"";
-  $("#art").style.backgroundImage=n&&n.img?`url(${n.img})`:"";
+  if(!demoOn){
+    $("#title").textContent=n?n.title:"Nothing playing";
+    $("#artist").textContent=n?n.artist:(tok()?"Start playing in Spotify":"Connect Spotify to begin");
+    $("#album").textContent=n?n.album:"";
+  }
+  $("#art").style.backgroundImage=n&&n.img?`url("${n.img}")`:"";
   $("#art").classList.toggle("play",!!(n&&n.playing)||demoOn);
   $("#ppi").innerHTML=(n&&n.playing)?'<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>':'<path d="M8 5v14l11-7z"/>';
   $("#tdur").textContent=n?fmt(n.dur):"0:00"
 }
-setInterval(()=>{if(np){const p=np.pos+(np.playing?performance.now()-stamp:0);$("#prog").style.width=Math.min(100,p/np.dur*100)+"%";$("#tcur").textContent=fmt(p)}},250);
+setInterval(()=>{if(np){const p=np.pos+(np.playing?performance.now()-stamp:0);$("#prog").style.width=Math.min(100,p/np.dur*100)+"%";$("#tcur").textContent=fmt(p)}else{$("#prog").style.width="0";$("#tcur").textContent="0:00"}},250);
 setInterval(poll,4000);
 $("#pp").onclick=async()=>{if(!np)return;await spApi(np.playing?"/me/player/pause":"/me/player/play","PUT");np.pos+=performance.now()-stamp;stamp=performance.now();np.playing=!np.playing;paint()};
 $("#next").onclick=async()=>{await spApi("/me/player/next","POST");setTimeout(poll,600)};
@@ -276,7 +324,7 @@ $("#prev").onclick=async()=>{await spApi("/me/player/previous","POST");setTimeou
 $("#bar").onclick=async e=>{if(!np)return;const r=e.currentTarget.getBoundingClientRect(),ms=((e.clientX-r.left)/r.width*np.dur)|0;await spApi("/me/player/seek?position_ms="+ms,"PUT");np.pos=ms;stamp=performance.now()};
 
 /* ---------- Adaptive colour ---------- */
-function setColors(a,b){const s=document.documentElement.style;s.setProperty("--a",a.join(","));s.setProperty("--b",b.join(","));$("#bg").style.background=$("#bg").style.background}
+function setColors(a,b){const s=document.documentElement.style;s.setProperty("--a",a.join(","));s.setProperty("--b",b.join(","))}
 function palette(url){
   if(!prefs.adapt)return;
   const im=new Image();im.crossOrigin="anonymous";
@@ -331,9 +379,9 @@ function startDemo(){
   const dl=ac.createDelay(1);dl.delayTime.value=.42;const fb=ac.createGain();fb.gain.value=.4;
   mix=ac.createGain();mix.connect(an);an.connect(ac.destination);mix.connect(dl);dl.connect(fb).connect(dl);dl.connect(an);
   t0=ac.currentTime+.1;nextBar=t0;barI=0;tick();sched=setInterval(tick,400);demoOn=true;
-  $("#demo").textContent="Stop";paint();$("#title").textContent="Glass Hours";$("#artist").textContent="NOCTURNE Originals"
+  $("#demo").textContent="Stop";$("#title").textContent="Glass Hours";$("#artist").textContent="NOCTURNE Originals";$("#album").textContent="";paint()
 }
-function stopDemo(){clearInterval(sched);ac.close();ac=null;an=null;demoOn=false;$("#demo").textContent="Play “Glass Hours”";paint();if(!np){$("#title").textContent="Nothing playing";$("#artist").textContent=tok()?"Start playing in Spotify":"Connect Spotify to begin"}$$(".ln").forEach(l=>l.className="ln");}
+function stopDemo(){clearInterval(sched);ac.close();ac=null;an=null;demoOn=false;$("#demo").textContent="Play “Glass Hours”";paint();$$(".ln").forEach(l=>l.className="ln")}
 $("#demo").onclick=()=>demoOn?stopDemo():startDemo();
 setInterval(()=>{
   if(!demoOn||!ac)return;
