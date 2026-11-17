@@ -159,7 +159,7 @@ input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--
 const CONFIG={
   SUPABASE_URL:"",            // https://xxxx.supabase.co
   SUPABASE_ANON_KEY:"",
-  SPOTIFY_CLIENT_ID:""        // from developer.spotify.com
+  SPOTIFY_CLIENT_ID:"d9dcf80dfa2b4c24895953129bbb6e0a"
 };
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const REDIRECT=location.origin+location.pathname;
@@ -221,7 +221,7 @@ const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").
 async function spLogin(){
   if(SB){const{error}=await SB.auth.signInWithOAuth({provider:"spotify",options:{redirectTo:REDIRECT,scopes:"user-read-playback-state user-modify-playback-state user-read-currently-playing"}});if(error){$("#aerr").textContent=error.message;$("#perr").textContent=error.message}return}
   if(location.protocol==="file:"){$("#aerr").textContent="Spotify login needs the site served over https (your Netlify URL or localhost), not a file opened from disk.";return}
-  if(!CONFIG.SPOTIFY_CLIENT_ID){const m="Setup needed: add your Supabase URL and anon key (for Spotify login) in CONFIG at the top of the script in index.html.";$("#aerr").textContent=m;$("#perr").textContent=m;$("#snote").textContent=m;return}
+  if(!CONFIG.SPOTIFY_CLIENT_ID){const m="Site owner setup needed: add SPOTIFY_CLIENT_ID in CONFIG (index.html).";$("#aerr").textContent=m;$("#perr").textContent=m;$("#snote").textContent=m;return}
   const v=b64(crypto.getRandomValues(new Uint8Array(48)));sessionStorage.setItem("nct_v",v);
   const ch=b64(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v)));
   location.href="https://accounts.spotify.com/authorize?"+new URLSearchParams({client_id:CONFIG.SPOTIFY_CLIENT_ID,response_type:"code",redirect_uri:REDIRECT,code_challenge_method:"S256",code_challenge:ch,scope:"user-read-playback-state user-modify-playback-state user-read-currently-playing"})
@@ -243,9 +243,10 @@ function grab(s){if(s&&s.provider_token&&s.user&&s.user.app_metadata.provider===
 $("#sdis").onclick=()=>{S.t=null;renderProfile();np=null;paint()};
 (async()=>{
   const c=new URLSearchParams(location.search).get("code");
-  if(c&&!SB){history.replaceState({},"",REDIRECT);try{await spToken({grant_type:"authorization_code",code:c,redirect_uri:REDIRECT,code_verifier:sessionStorage.getItem("nct_v")});renderProfile()}catch(e){$("#snote").textContent="Spotify sign-in failed. Check the redirect URI in your Spotify dashboard."}}
+  if(c&&!SB){history.replaceState({},"",REDIRECT);try{await spToken({grant_type:"authorization_code",code:c,redirect_uri:REDIRECT,code_verifier:sessionStorage.getItem("nct_v")});enterSpotify()}catch(e){$("#snote").textContent="Spotify sign-in failed. Check the redirect URI in your Spotify dashboard."}}
 })();
 
+function enterSpotify(){$("#auth").classList.add("off");renderProfile();poll();spApi("/me").then(m=>{if(m&&!prefs.name){prefs.name=m.display_name||"";renderProfile()}})}
 /* ---------- Now playing ---------- */
 let np=null,stamp=0;
 async function poll(){
@@ -346,7 +347,7 @@ $$(".ln").forEach(l=>l.className="ln");
 (async()=>{
   applyPrefs();renderProfile();paint();poll();
   if(SB){const{data}=await SB.auth.getSession();if(data.session){grab(data.session);await onUser(data.session.user);poll()}SB.auth.onAuthStateChange((e,s)=>{if(e==="SIGNED_OUT"){user=null;$("#auth").classList.remove("off")}else if(e==="SIGNED_IN"&&s&&!user){grab(s);onUser(s.user).then(poll)}})}
-  else if(!SB)$("#auth").classList.remove("off")
+  else if(tok())enterSpotify()
 })();
 </script>
 </body>
