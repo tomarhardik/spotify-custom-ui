@@ -13,7 +13,10 @@ SETUP (see CONFIG below). Supabase SQL:
     display_name text, prefs jsonb default '{}', spotify_connected boolean default false);
   alter table profiles enable row level security;
   create policy "own" on profiles for all using (auth.uid()=id) with check (auth.uid()=id);
-Spotify: Dashboard > add Redirect URI = your Netlify URL (exactly). Uses PKCE: no client secret in the browser.
+Spotify login: Supabase > Authentication > Providers > Spotify: enable, paste Client ID + Secret, copy the callback URL shown
+  (https://YOUR-PROJECT.supabase.co/auth/v1/callback) into Spotify Dashboard > Redirect URIs.
+  Supabase > Authentication > URL Configuration: set Site URL + Redirect URLs to your Netlify URL.
+Spotify (guest mode only): Dashboard > add Redirect URI = your Netlify URL (exactly). Uses PKCE: no client secret in the browser.
 Netlify: deploy this file; optional netlify.toml with security headers (CSP, X-Frame-Options).
 -->
 <style>
@@ -76,6 +79,7 @@ input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--
 #auth{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(2,7,5,.82);backdrop-filter:blur(18px);transition:.8s;padding:20px}
 #auth.off{opacity:0;visibility:hidden}
 #auth .logo{font-size:30px;text-align:center;display:block;margin-bottom:22px}
+.spot{width:100%;margin:6px 0 0;background:var(--em);color:var(--void);font-weight:600;border-color:var(--em)}.spot:hover{background:var(--em2)}
 .err{color:#fda4af;font-size:13px;min-height:18px;margin-top:12px}
 .sw{margin-top:10px;font-size:13px;color:var(--dim)}.sw u{cursor:pointer;color:var(--em2)}
 .toggle{width:46px;height:26px;border-radius:99px;background:#223;position:relative;transition:.3s}
@@ -140,6 +144,8 @@ input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--
   <form class="card" id="af" onsubmit="return false">
     <span class="logo">NOCTURNE</span>
     <h2 id="atitle">Sign in</h2>
+    <button type="button" class="pill spot" id="spAuth">Continue with Spotify</button>
+    <p class="sw" style="text-align:center">or use email</p>
     <label>Email<input type="email" id="em" autocomplete="email" required></label>
     <label>Password<input type="password" id="pw" minlength="8" autocomplete="current-password" required></label>
     <p class="err" id="aerr"></p>
@@ -180,15 +186,17 @@ $("#asub").onclick=async()=>{
 };
 async function onUser(u){
   user=u;$("#auth").classList.add("off");
+  if(prefs.name===""&&u.user_metadata&&u.user_metadata.name)prefs.name=u.user_metadata.name;
   const{data}=await SB.from("profiles").select("*").eq("id",u.id).maybeSingle();
   if(data){prefs={...prefs,...data.prefs,name:data.display_name||""}}
-  else await SB.from("profiles").insert({id:u.id,display_name:u.email.split("@")[0],prefs});
+  else await SB.from("profiles").insert({id:u.id,display_name:prefs.name||(u.email||"listener").split("@")[0],prefs:{adapt:prefs.adapt,particles:prefs.particles}});
+  if(tok())SB.from("profiles").update({spotify_connected:true}).eq("id",u.id).then(()=>{});
   renderProfile();applyPrefs()
 }
 $("#out").onclick=async()=>{if(SB)await SB.auth.signOut();user=null;$("#auth").classList.remove("off");renderProfile()};
 function renderProfile(){
-  $("#pname").textContent=prefs.name||(user?user.email.split("@")[0]:"Guest");
-  $("#pmail").textContent=user?user.email:"Not signed in (preferences stay on this device)";
+  $("#pname").textContent=prefs.name||(user?(user.email||"Listener").split("@")[0]:"Guest");
+  $("#pmail").textContent=user?(user.email||"Signed in with Spotify"):"Not signed in (preferences stay on this device)";
   $("#dname").value=prefs.name||"";
   $("#pAdapt").classList.toggle("on",prefs.adapt);$("#pPart").classList.toggle("on",prefs.particles);
   const c=!!tok();$("#sdot").classList.toggle("ok",c);$("#sstat").textContent=c?"Spotify connected":"Spotify not connected";
@@ -211,6 +219,7 @@ const S={get t(){try{return JSON.parse(localStorage.getItem("nct_sp")||"null")}c
 const tok=()=>S.t&&S.t.access;
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 async function spLogin(){
+  if(SB){const{error}=await SB.auth.signInWithOAuth({provider:"spotify",options:{redirectTo:REDIRECT,scopes:"user-read-playback-state user-modify-playback-state user-read-currently-playing"}});if(error){$("#aerr").textContent=error.message;$("#perr").textContent=error.message}return}
   if(!CONFIG.SPOTIFY_CLIENT_ID){$("#perr").textContent="Add your Spotify client ID in CONFIG.";$("#snote").textContent="Add your Spotify client ID in CONFIG first.";return}
   const v=b64(crypto.getRandomValues(new Uint8Array(48)));sessionStorage.setItem("nct_v",v);
   const ch=b64(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v)));
@@ -223,15 +232,17 @@ async function spToken(body){
 }
 async function spApi(path,method="GET"){
   if(!S.t)return null;
+  if(Date.now()>S.t.exp&&!S.t.refresh){S.t=null;np=null;renderProfile();paint();$("#snote").textContent="Your Spotify session expired. Press Connect Spotify to reconnect.";return null}
   if(Date.now()>S.t.exp){try{await spToken({grant_type:"refresh_token",refresh_token:S.t.refresh})}catch(e){S.t=null;renderProfile();return null}}
   const r=await fetch("https://api.spotify.com/v1"+path,{method,headers:{Authorization:"Bearer "+S.t.access}});
   return r.status===200?r.json():null
 }
-$("#sconnect").onclick=spLogin;
+$("#sconnect").onclick=spLogin;$("#spAuth").onclick=spLogin;
+function grab(s){if(s&&s.provider_token&&s.user&&s.user.app_metadata.provider==="spotify")S.t={access:s.provider_token,refresh:null,exp:Date.now()+3500e3}}
 $("#sdis").onclick=()=>{S.t=null;renderProfile();np=null;paint()};
 (async()=>{
   const c=new URLSearchParams(location.search).get("code");
-  if(c){history.replaceState({},"",REDIRECT);try{await spToken({grant_type:"authorization_code",code:c,redirect_uri:REDIRECT,code_verifier:sessionStorage.getItem("nct_v")});renderProfile()}catch(e){$("#snote").textContent="Spotify sign-in failed. Check the redirect URI in your Spotify dashboard."}}
+  if(c&&!SB){history.replaceState({},"",REDIRECT);try{await spToken({grant_type:"authorization_code",code:c,redirect_uri:REDIRECT,code_verifier:sessionStorage.getItem("nct_v")});renderProfile()}catch(e){$("#snote").textContent="Spotify sign-in failed. Check the redirect URI in your Spotify dashboard."}}
 })();
 
 /* ---------- Now playing ---------- */
@@ -333,7 +344,7 @@ $$(".ln").forEach(l=>l.className="ln");
 /* ---------- Boot ---------- */
 (async()=>{
   applyPrefs();renderProfile();paint();poll();
-  if(SB){const{data}=await SB.auth.getSession();if(data.session)await onUser(data.session.user);SB.auth.onAuthStateChange((e,s)=>{if(e==="SIGNED_OUT"){user=null;$("#auth").classList.remove("off")}})}
+  if(SB){const{data}=await SB.auth.getSession();if(data.session){grab(data.session);await onUser(data.session.user);poll()}SB.auth.onAuthStateChange((e,s)=>{if(e==="SIGNED_OUT"){user=null;$("#auth").classList.remove("off")}else if(e==="SIGNED_IN"&&s&&!user){grab(s);onUser(s.user).then(poll)}})}
   else if(!SB)$("#auth").classList.remove("off")
 })();
 </script>
