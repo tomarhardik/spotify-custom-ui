@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NOCTURNE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,500;1,300;1,500&family=Manrope:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<!--
+SETUP (see CONFIG below). Supabase SQL:
+  create table profiles(id uuid primary key references auth.users on delete cascade,
+    display_name text, prefs jsonb default '{}', spotify_connected boolean default false);
+  alter table profiles enable row level security;
+  create policy "own" on profiles for all using (auth.uid()=id) with check (auth.uid()=id);
+Spotify: Dashboard > add Redirect URI = your Netlify URL (exactly). Uses PKCE: no client secret in the browser.
+Netlify: deploy this file; optional netlify.toml with security headers (CSP, X-Frame-Options).
+-->
+<style>
+:root{--void:#020705;--deep:#06130e;--em:#10b981;--em2:#6ee7b7;--mist:#d9f2e7;--dim:#7fa797;--a:16,185,129;--b:4,120,87}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--void);color:var(--mist);font-family:Manrope,system-ui,sans-serif;font-weight:300;overflow:hidden}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+#bg,#fx{position:fixed;inset:0;width:100%;height:100%}
+#bg{background:radial-gradient(60% 60% at 20% 15%,rgba(var(--a),.35),transparent 70%),radial-gradient(55% 55% at 85% 90%,rgba(var(--b),.4),transparent 70%),var(--void);transition:background 2s;filter:saturate(1.2)}
+#bg::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 40%,transparent 30%,rgba(0,0,0,.75))}
+#fx{pointer-events:none}
+nav{position:fixed;top:env(safe-area-inset-top);left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:22px clamp(20px,4vw,56px);z-index:5}
+.logo{font:500 22px/1 "Cormorant Garamond",serif;letter-spacing:.5em;color:var(--em2);text-shadow:0 0 18px rgba(var(--a),.7)}
+nav div{display:flex;gap:6px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.tab{padding:9px 16px;border-radius:99px;color:var(--dim);transition:.4s;font-size:14px}
+.tab:hover,.tab.on{color:var(--mist);background:rgba(var(--a),.16);box-shadow:0 0 22px rgba(var(--a),.25)}
+:focus-visible{outline:2px solid var(--em2);outline-offset:3px}
+main{position:fixed;inset:0;z-index:2}
+.view{position:absolute;inset:0;display:flex;opacity:0;visibility:hidden;transform:scale(1.03);filter:blur(14px);transition:opacity .9s,transform .9s,filter .9s,visibility .9s}
+.view.on{opacity:1;visibility:visible;transform:none;filter:none}
+#listen{align-items:center;justify-content:center;gap:clamp(28px,6vw,96px);padding:90px clamp(20px,6vw,90px) 40px;flex-wrap:wrap}
+.art{width:min(40vh,70vw,440px);aspect-ratio:1;border-radius:50%;background:#0a1f17 center/cover;box-shadow:0 0 120px rgba(var(--a),.45),0 30px 80px #000;position:relative;animation:spin 40s linear infinite;animation-play-state:paused;transition:box-shadow 2s}
+.art.play{animation-play-state:running}
+.art::after{content:"";position:absolute;inset:41%;border-radius:50%;background:var(--void);box-shadow:inset 0 0 0 2px rgba(255,255,255,.08)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.meta{max-width:440px;flex:1 1 280px}
+h1{font:300 clamp(40px,6vw,76px)/1 "Cormorant Garamond",serif;letter-spacing:-.01em;text-shadow:0 0 40px rgba(var(--a),.5)}
+.artist{margin-top:14px;font-size:18px;color:var(--em2)}
+.album{margin-top:4px;color:var(--dim);font-size:14px}
+.bar{margin-top:34px;height:18px;display:flex;align-items:center;cursor:pointer}
+.bar i{display:block;width:100%;height:3px;border-radius:3px;background:rgba(255,255,255,.12);position:relative}
+.bar b{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;background:linear-gradient(90deg,var(--b),var(--em2));box-shadow:0 0 14px var(--em)}
+.times{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:4px}
+.ctl{display:flex;align-items:center;gap:26px;margin-top:22px}
+.ctl button{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:var(--mist);transition:.3s}
+.ctl button:hover{background:rgba(var(--a),.2);box-shadow:0 0 24px rgba(var(--a),.4)}
+.ctl .pp{width:68px;height:68px;background:var(--em);color:var(--void);box-shadow:0 0 40px rgba(var(--a),.6)}
+.ctl .pp:hover{background:var(--em2)}
+svg{width:22px;height:22px;fill:currentColor}
+.note{margin-top:22px;font-size:13px;color:var(--dim);line-height:1.6}
+.pill{display:inline-block;margin-top:18px;padding:11px 22px;border-radius:99px;border:1px solid rgba(var(--a),.6);color:var(--em2);transition:.3s}
+.pill:hover{background:rgba(var(--a),.2);box-shadow:0 0 28px rgba(var(--a),.4)}
+#lyrics{flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:90px 24px 40px}
+#lines{height:60vh;width:min(900px,100%);overflow:hidden;position:relative;mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent)}
+#track{position:absolute;left:0;right:0;top:50%;transition:transform 1s cubic-bezier(.2,.8,.2,1)}
+.ln{font:italic 300 clamp(26px,4.6vw,54px)/1.25 "Cormorant Garamond",serif;padding:.35em 0;color:rgba(217,242,231,.18);filter:blur(2px);transition:.9s}
+.ln.on{color:#eafff5;filter:none;text-shadow:0 0 30px var(--em),0 0 80px rgba(var(--a),.7);transform:scale(1.06)}
+.ln.past{color:rgba(217,242,231,.35)}
+#lyrics .sub{color:var(--dim);font-size:13px;margin-top:14px;max-width:520px}
+#profile{align-items:center;justify-content:center;padding:90px 20px}
+.card{width:min(460px,100%);padding:34px;border-radius:28px;background:rgba(4,16,11,.6);backdrop-filter:blur(22px);border:1px solid rgba(var(--a),.25);box-shadow:0 0 80px rgba(var(--a),.12)}
+.card h2{font:300 34px "Cormorant Garamond",serif;margin-bottom:6px}
+label{display:block;margin-top:18px;font-size:13px;color:var(--dim)}
+input[type=text],input[type=email],input[type=password]{width:100%;margin-top:6px;padding:13px 16px;border-radius:14px;border:1px solid rgba(var(--a),.3);background:rgba(0,0,0,.4);color:var(--mist);font:inherit}
+input:focus{outline:none;border-color:var(--em2);box-shadow:0 0 18px rgba(var(--a),.35)}
+.row{display:flex;justify-content:space-between;align-items:center;margin-top:18px;font-size:14px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#555;margin-right:8px}
+.dot.ok{background:var(--em);box-shadow:0 0 12px var(--em)}
+#auth{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(2,7,5,.82);backdrop-filter:blur(18px);transition:.8s;padding:20px}
+#auth.off{opacity:0;visibility:hidden}
+#auth .logo{font-size:30px;text-align:center;display:block;margin-bottom:22px}
+.err{color:#fda4af;font-size:13px;min-height:18px;margin-top:12px}
+.sw{margin-top:10px;font-size:13px;color:var(--dim)}.sw u{cursor:pointer;color:var(--em2)}
+.toggle{width:46px;height:26px;border-radius:99px;background:#223;position:relative;transition:.3s}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--mist);transition:.3s}
+.toggle.on{background:var(--em)}.toggle.on::after{left:23px}
+@media(max-width:700px){#listen{gap:22px;padding-top:80px;overflow:auto;align-content:flex-start}.tab{padding:8px 11px}.logo{letter-spacing:.3em;font-size:18px}.meta{text-align:center}.ctl{justify-content:center}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.01s!important}}
+</style>
+</head>
+<body>
+<div id="bg"></div><canvas id="fx"></canvas>
+
+<nav>
+  <span class="logo">NOCTURNE</span>
+  <div role="tablist">
+    <button class="tab on" data-v="listen">Listen</button>
+    <button class="tab" data-v="lyrics">Lyrics</button>
+    <button class="tab" data-v="profile">Profile</button>
+  </div>
+</nav>
+
+<main>
+  <section class="view on" id="listen">
+    <div class="art" id="art" role="img" aria-label="Album artwork"></div>
+    <div class="meta">
+      <h1 id="title">Nothing playing</h1>
+      <p class="artist" id="artist">Connect Spotify to begin</p>
+      <p class="album" id="album"></p>
+      <div class="bar" id="bar" role="slider" aria-label="Song progress" tabindex="0"><i><b id="prog"></b></i></div>
+      <div class="times"><span id="tcur">0:00</span><span id="tdur">0:00</span></div>
+      <div class="ctl">
+        <button id="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg></button>
+        <button class="pp" id="pp" aria-label="Play or pause"><svg id="ppi" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <button id="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18V6l8.5 6z"/></svg></button>
+      </div>
+      <p class="note" id="snote"></p>
+      <button class="pill" id="sconnect">Connect Spotify</button>
+    </div>
+  </section>
+
+  <section class="view" id="lyrics">
+    <div id="lines"><div id="track"></div></div>
+    <button class="pill" id="demo">Play “Glass Hours”</button>
+    <p class="sub">Synced lyrics use an original track and lyrics made for NOCTURNE. Spotify recordings are never synced to lyrics or visuals.</p>
+  </section>
+
+  <section class="view" id="profile">
+    <div class="card">
+      <h2 id="pname">Guest</h2>
+      <p class="album" id="pmail">Not signed in</p>
+      <label>Display name<input type="text" id="dname" maxlength="40"></label>
+      <div class="row"><span>Adaptive colours from artwork</span><button class="toggle on" id="pAdapt" aria-label="Toggle adaptive colours"></button></div>
+      <div class="row"><span>Floating particles</span><button class="toggle on" id="pPart" aria-label="Toggle particles"></button></div>
+      <div class="row"><span><i class="dot" id="sdot"></i><span id="sstat">Spotify not connected</span></span><button class="pill" style="margin:0;padding:7px 16px" id="sdis">Disconnect</button></div>
+      <div class="row"><button class="pill" style="margin:0" id="save">Save</button><button class="tab" id="out">Sign out</button></div>
+      <p class="err" id="perr"></p>
+    </div>
+  </section>
+</main>
+
+<div id="auth">
+  <form class="card" id="af" onsubmit="return false">
+    <span class="logo">NOCTURNE</span>
+    <h2 id="atitle">Sign in</h2>
+    <label>Email<input type="email" id="em" autocomplete="email" required></label>
+    <label>Password<input type="password" id="pw" minlength="8" autocomplete="current-password" required></label>
+    <p class="err" id="aerr"></p>
+    <button class="pill" id="asub" style="width:100%;margin-top:6px">Sign in</button>
+    <p class="sw"><span id="swt">New here?</span> <u id="sw">Create an account</u> · <u id="guest">Continue as guest</u></p>
+  </form>
+</div>
+
+<script>
+/* ===== CONFIG: fill in. Both keys are public by design; RLS protects data. ===== */
+const CONFIG={
+  SUPABASE_URL:"",            // https://xxxx.supabase.co
+  SUPABASE_ANON_KEY:"",
+  SPOTIFY_CLIENT_ID:""        // from developer.spotify.com
+};
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const REDIRECT=location.origin+location.pathname;
+const SB=(CONFIG.SUPABASE_URL&&window.supabase)?supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY):null;
+let user=null,prefs={adapt:true,particles:true,name:""};
+const fmt=ms=>{ms=Math.max(0,ms|0)/1000|0;return(ms/60|0)+":"+String(ms%60).padStart(2,"0")};
+
+/* ---------- Views ---------- */
+function show(v){$$(".view").forEach(e=>e.classList.toggle("on",e.id===v));$$(".tab").forEach(t=>t.classList.toggle("on",t.dataset.v===v))}
+$$(".tab").forEach(t=>t.onclick=()=>show(t.dataset.v));
+
+/* ---------- Auth ---------- */
+let signup=false;
+$("#sw").onclick=()=>{signup=!signup;$("#atitle").textContent=signup?"Create account":"Sign in";$("#asub").textContent=signup?"Create account":"Sign in";$("#swt").textContent=signup?"Have an account?":"New here?";$("#sw").textContent=signup?"Sign in":"Create an account";$("#pw").autocomplete=signup?"new-password":"current-password"};
+$("#guest").onclick=()=>{$("#auth").classList.add("off");renderProfile()};
+$("#asub").onclick=async()=>{
+  const e=$("#em").value.trim(),p=$("#pw").value;$("#aerr").textContent="";
+  if(!SB){$("#aerr").textContent="Supabase isn’t configured yet. Add your keys in CONFIG, or continue as guest.";return}
+  if(!e||p.length<8){$("#aerr").textContent="Enter an email and a password of at least 8 characters.";return}
+  const r=signup?await SB.auth.signUp({email:e,password:p}):await SB.auth.signInWithPassword({email:e,password:p});
+  if(r.error){$("#aerr").textContent=r.error.message;return}
+  if(signup&&!r.data.session){$("#aerr").textContent="Check your inbox to confirm your email, then sign in.";return}
+  await onUser(r.data.user)
+};
+async function onUser(u){
+  user=u;$("#auth").classList.add("off");
+  const{data}=await SB.from("profiles").select("*").eq("id",u.id).maybeSingle();
+  if(data){prefs={...prefs,...data.prefs,name:data.display_name||""}}
+  else await SB.from("profiles").insert({id:u.id,display_name:u.email.split("@")[0],prefs});
+  renderProfile();applyPrefs()
+}
+$("#out").onclick=async()=>{if(SB)await SB.auth.signOut();user=null;$("#auth").classList.remove("off");renderProfile()};
+function renderProfile(){
+  $("#pname").textContent=prefs.name||(user?user.email.split("@")[0]:"Guest");
+  $("#pmail").textContent=user?user.email:"Not signed in (preferences stay on this device)";
+  $("#dname").value=prefs.name||"";
+  $("#pAdapt").classList.toggle("on",prefs.adapt);$("#pPart").classList.toggle("on",prefs.particles);
+  const c=!!tok();$("#sdot").classList.toggle("ok",c);$("#sstat").textContent=c?"Spotify connected":"Spotify not connected";
+  $("#sdis").style.display=c?"":"none";$("#sconnect").style.display=c?"none":"";
+  $("#snote").textContent=c?"Playback controls work on your active Spotify device (Premium required).":"Spotify Premium is needed for playback controls. Open Spotify on any device, then press play."
+}
+$("#pAdapt").onclick=()=>{prefs.adapt=!prefs.adapt;renderProfile()};
+$("#pPart").onclick=()=>{prefs.particles=!prefs.particles;renderProfile()};
+$("#save").onclick=async()=>{
+  prefs.name=$("#dname").value.trim();applyPrefs();renderProfile();
+  localStorage.setItem("nct_prefs",JSON.stringify(prefs));
+  if(SB&&user){const{error}=await SB.from("profiles").upsert({id:user.id,display_name:prefs.name,prefs:{adapt:prefs.adapt,particles:prefs.particles},spotify_connected:!!tok()});$("#perr").textContent=error?error.message:"Saved."}
+  else $("#perr").textContent="Saved on this device."
+};
+function applyPrefs(){if(!prefs.adapt)setColors([16,185,129],[4,120,87])}
+try{Object.assign(prefs,JSON.parse(localStorage.getItem("nct_prefs")||"{}"))}catch(e){}
+
+/* ---------- Spotify (PKCE, no secret) ---------- */
+const S={get t(){try{return JSON.parse(localStorage.getItem("nct_sp")||"null")}catch(e){return null}},set t(v){v?localStorage.setItem("nct_sp",JSON.stringify(v)):localStorage.removeItem("nct_sp")}};
+const tok=()=>S.t&&S.t.access;
+const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+async function spLogin(){
+  if(!CONFIG.SPOTIFY_CLIENT_ID){$("#perr").textContent="Add your Spotify client ID in CONFIG.";$("#snote").textContent="Add your Spotify client ID in CONFIG first.";return}
+  const v=b64(crypto.getRandomValues(new Uint8Array(48)));sessionStorage.setItem("nct_v",v);
+  const ch=b64(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(v)));
+  location.href="https://accounts.spotify.com/authorize?"+new URLSearchParams({client_id:CONFIG.SPOTIFY_CLIENT_ID,response_type:"code",redirect_uri:REDIRECT,code_challenge_method:"S256",code_challenge:ch,scope:"user-read-playback-state user-modify-playback-state user-read-currently-playing"})
+}
+async function spToken(body){
+  const r=await fetch("https://accounts.spotify.com/api/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:CONFIG.SPOTIFY_CLIENT_ID,...body})});
+  if(!r.ok)throw 0;const j=await r.json();
+  S.t={access:j.access_token,refresh:j.refresh_token||(S.t&&S.t.refresh),exp:Date.now()+j.expires_in*1000-30000}
+}
+async function spApi(path,method="GET"){
+  if(!S.t)return null;
+  if(Date.now()>S.t.exp){try{await spToken({grant_type:"refresh_token",refresh_token:S.t.refresh})}catch(e){S.t=null;renderProfile();return null}}
+  const r=await fetch("https://api.spotify.com/v1"+path,{method,headers:{Authorization:"Bearer "+S.t.access}});
+  return r.status===200?r.json():null
+}
+$("#sconnect").onclick=spLogin;
+$("#sdis").onclick=()=>{S.t=null;renderProfile();np=null;paint()};
+(async()=>{
+  const c=new URLSearchParams(location.search).get("code");
+  if(c){history.replaceState({},"",REDIRECT);try{await spToken({grant_type:"authorization_code",code:c,redirect_uri:REDIRECT,code_verifier:sessionStorage.getItem("nct_v")});renderProfile()}catch(e){$("#snote").textContent="Spotify sign-in failed. Check the redirect URI in your Spotify dashboard."}}
+})();
+
+/* ---------- Now playing ---------- */
+let np=null,stamp=0;
+async function poll(){
+  if(!tok())return;
+  const d=await spApi("/me/player");
+  if(!d||!d.item){np=null;paint();return}
+  const it=d.item,img=(it.album.images[0]||{}).url;
+  const changed=!np||np.id!==it.id;
+  np={id:it.id,title:it.name,artist:it.artists.map(a=>a.name).join(", "),album:it.album.name+" · "+(it.album.release_date||"").slice(0,4),img,dur:it.duration_ms,pos:d.progress_ms,playing:d.is_playing};
+  stamp=performance.now();paint();if(changed&&img)palette(img)
+}
+function paint(){
+  const n=np;
+  $("#title").textContent=n?n.title:"Nothing playing";
+  $("#artist").textContent=n?n.artist:(tok()?"Start playing in Spotify":"Connect Spotify to begin");
+  $("#album").textContent=n?n.album:"";
+  $("#art").style.backgroundImage=n&&n.img?`url(${n.img})`:"";
+  $("#art").classList.toggle("play",!!(n&&n.playing)||demoOn);
+  $("#ppi").innerHTML=(n&&n.playing)?'<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>':'<path d="M8 5v14l11-7z"/>';
+  $("#tdur").textContent=n?fmt(n.dur):"0:00"
+}
+setInterval(()=>{if(np){const p=np.pos+(np.playing?performance.now()-stamp:0);$("#prog").style.width=Math.min(100,p/np.dur*100)+"%";$("#tcur").textContent=fmt(p)}},250);
+setInterval(poll,4000);
+$("#pp").onclick=async()=>{if(!np)return;await spApi(np.playing?"/me/player/pause":"/me/player/play","PUT");np.pos+=performance.now()-stamp;stamp=performance.now();np.playing=!np.playing;paint()};
+$("#next").onclick=async()=>{await spApi("/me/player/next","POST");setTimeout(poll,600)};
+$("#prev").onclick=async()=>{await spApi("/me/player/previous","POST");setTimeout(poll,600)};
+$("#bar").onclick=async e=>{if(!np)return;const r=e.currentTarget.getBoundingClientRect(),ms=((e.clientX-r.left)/r.width*np.dur)|0;await spApi("/me/player/seek?position_ms="+ms,"PUT");np.pos=ms;stamp=performance.now()};
+
+/* ---------- Adaptive colour ---------- */
+function setColors(a,b){const s=document.documentElement.style;s.setProperty("--a",a.join(","));s.setProperty("--b",b.join(","));$("#bg").style.background=$("#bg").style.background}
+function palette(url){
+  if(!prefs.adapt)return;
+  const im=new Image();im.crossOrigin="anonymous";
+  im.onload=()=>{try{
+    const c=document.createElement("canvas");c.width=c.height=24;const x=c.getContext("2d");x.drawImage(im,0,0,24,24);
+    const d=x.getImageData(0,0,24,24).data;let best=null,bs=-1,avg=[0,0,0],n=0;
+    for(let i=0;i<d.length;i+=4){const r=d[i],g=d[i+1],b=d[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=(mx-mn)/(mx||1),sc=sat*(mx/255);avg[0]+=r;avg[1]+=g;avg[2]+=b;n++;if(sc>bs&&mx>60){bs=sc;best=[r,g,b]}}
+    best=best||[16,185,129];avg=avg.map(v=>v/n|0);
+    const lift=c=>c.map(v=>Math.min(255,v*1.15+20|0));
+    setColors(lift(best),avg.map(v=>v*.6|0))
+  }catch(e){}};im.src=url
+}
+
+/* ---------- Particles + audio-reactive ring ---------- */
+const cv=$("#fx"),cx=cv.getContext("2d");let W,H,P=[];
+function size(){W=cv.width=innerWidth*devicePixelRatio;H=cv.height=innerHeight*devicePixelRatio;P=Array.from({length:Math.min(90,innerWidth/12|0)},()=>({x:Math.random()*W,y:Math.random()*H,r:(Math.random()*1.8+.4)*devicePixelRatio,v:Math.random()*.3+.08,p:Math.random()*6}))}
+addEventListener("resize",size);size();
+let an=null,fd=null,level=0;
+function frame(t){
+  cx.clearRect(0,0,W,H);
+  if(an){an.getByteFrequencyData(fd);let s=0;for(let i=0;i<24;i++)s+=fd[i];level+=((s/24/255)-level)*.15}else level*=.95;
+  const col=getComputedStyle(document.documentElement).getPropertyValue("--a");
+  if(prefs.particles)for(const q of P){q.y-=q.v*devicePixelRatio*(1+level*3);q.x+=Math.sin(t/2000+q.p)*.3;if(q.y<-5){q.y=H+5;q.x=Math.random()*W}
+    cx.fillStyle=`rgba(${col},${.25+.35*Math.sin(t/900+q.p)**2})`;cx.shadowColor=`rgb(${col})`;cx.shadowBlur=12;cx.beginPath();cx.arc(q.x,q.y,q.r*(1+level*2),0,7);cx.fill()}
+  if(an&&$("#lyrics").classList.contains("on")){
+    cx.shadowBlur=20;cx.strokeStyle=`rgba(${col},.7)`;cx.lineWidth=2*devicePixelRatio;cx.beginPath();
+    const R=Math.min(W,H)*.36,N=96;
+    for(let i=0;i<=N;i++){const a=i/N*Math.PI*2,m=fd[(i%48)+2]/255;const r=R+m*R*.28;const X=W/2+Math.cos(a)*r,Y=H/2+Math.sin(a)*r;i?cx.lineTo(X,Y):cx.moveTo(X,Y)}
+    cx.stroke()}
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame);
+
+/* ---------- Original track + lyrics (synthesised in-browser, ours to license) ---------- */
+const LYR=[[0,"Midnight pours across the glass"],[6,"Every hour learns to slow"],[12,"I keep the lanterns lit for you"],[18,"Where the quiet rivers go"],[24,"Emerald light on sleeping streets"],[30,"Footsteps fade to velvet air"],[36,"Hold the dark a little longer"],[42,"We were never going anywhere"]];
+const LEN=48;let demoOn=false,ac,t0,sched;
+$("#track").innerHTML=LYR.map(l=>`<div class="ln">${l[1]}</div>`).join("");
+const CH=[[220,261.6,329.6],[174.6,220,261.6],[261.6,329.6,392],[196,246.9,293.7]];
+function bar(i,when){
+  const ch=CH[i%4];ch.forEach((f,k)=>[1,2].forEach(m=>{
+    const o=ac.createOscillator(),g=ac.createGain();o.type=m==1?"sine":"triangle";o.frequency.value=f*(m==1?1:.5);
+    g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(.05/m,when+1.8);g.gain.linearRampToValueAtTime(0,when+6.4);
+    o.connect(g).connect(mix);o.start(when);o.stop(when+6.5)}));
+  for(let s=0;s<12;s++){const f=ch[s%3]*2*(s%4==3?2:1),w=when+s*.5,o=ac.createOscillator(),g=ac.createGain();o.type="sine";o.frequency.value=f;
+    g.gain.setValueAtTime(0,w);g.gain.linearRampToValueAtTime(.06,w+.02);g.gain.exponentialRampToValueAtTime(.0005,w+1.4);o.connect(g).connect(mix);o.start(w);o.stop(w+1.5)}
+}
+let mix,nextBar,barI;
+function tick(){while(nextBar<ac.currentTime+1){bar(barI++,nextBar);nextBar+=6}}
+function startDemo(){
+  ac=new(window.AudioContext||window.webkitAudioContext)();
+  an=ac.createAnalyser();an.fftSize=256;an.smoothingTimeConstant=.82;fd=new Uint8Array(an.frequencyBinCount);
+  const dl=ac.createDelay(1);dl.delayTime.value=.42;const fb=ac.createGain();fb.gain.value=.4;
+  mix=ac.createGain();mix.connect(an);an.connect(ac.destination);mix.connect(dl);dl.connect(fb).connect(dl);dl.connect(an);
+  t0=ac.currentTime+.1;nextBar=t0;barI=0;tick();sched=setInterval(tick,400);demoOn=true;
+  $("#demo").textContent="Stop";paint();$("#title").textContent="Glass Hours";$("#artist").textContent="NOCTURNE Originals"
+}
+function stopDemo(){clearInterval(sched);ac.close();ac=null;an=null;demoOn=false;$("#demo").textContent="Play “Glass Hours”";paint();if(!np){$("#title").textContent="Nothing playing";$("#artist").textContent=tok()?"Start playing in Spotify":"Connect Spotify to begin"}$$(".ln").forEach(l=>l.className="ln");}
+$("#demo").onclick=()=>demoOn?stopDemo():startDemo();
+setInterval(()=>{
+  if(!demoOn||!ac)return;
+  const t=(ac.currentTime-t0)%LEN;if(t<0)return;let i=0;LYR.forEach((l,k)=>{if(t>=l[0])i=k});
+  $$(".ln").forEach((el,k)=>el.className="ln"+(k==i?" on":k<i?" past":""));
+  const el=$$(".ln")[i];$("#track").style.transform=`translateY(${-(el.offsetTop+el.offsetHeight/2)}px)`
+},120);
+$$(".ln").forEach(l=>l.className="ln");
+
+/* ---------- Boot ---------- */
+(async()=>{
+  applyPrefs();renderProfile();paint();poll();
+  if(SB){const{data}=await SB.auth.getSession();if(data.session)await onUser(data.session.user);SB.auth.onAuthStateChange((e,s)=>{if(e==="SIGNED_OUT"){user=null;$("#auth").classList.remove("off")}})}
+  else if(!SB)$("#auth").classList.remove("off")
+})();
+</script>
+</body>
+</html>
